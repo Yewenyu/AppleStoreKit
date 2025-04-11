@@ -1,0 +1,157 @@
+//
+//  IAPManager.swift
+//  AppleStoreKit
+//
+//  Created by ye on 2025/4/1.
+//
+
+import Foundation
+import StoreKit
+
+public class IAPManager {
+    public static let shared = IAPManager()
+    private init() {}
+    
+    private lazy var storeKit1Manager = StoreKit1Manager.shared
+    @available(iOS 15.0, *)
+    private var storeKit2Manager: StoreKit2Manager { StoreKit2Manager.shared }
+    
+    public var useV2 = true
+    
+    public func appAccountToken(_ token:String){
+        if #available(iOS 15.0, *){
+            storeKit2Manager.appAccountToken = token
+        }
+    }
+    
+}
+
+// MARK: - Public Interface
+extension IAPManager {
+    public func fetchProducts(productIDs: [String]) async -> Result<[UnifiedProduct], IAPError> {
+        if #available(iOS 15.0, *),useV2 {
+            return await storeKit2Manager.fetchProducts(productIDs: productIDs)
+        } else {
+            return await storeKit1Manager.fetchProducts(productIDs: productIDs)
+        }
+    }
+    
+    public func purchase(productID: String) async -> Result<UnifiedTransaction, IAPError> {
+        if #available(iOS 15.0, *),useV2 {
+            return await storeKit2Manager.purchase(productID: productID)
+        } else {
+            return await storeKit1Manager.purchase(productID: productID)
+        }
+    }
+    public func restore() async -> Result<[UnifiedTransaction],IAPError>{
+        if #available(iOS 15.0, *),useV2 {
+            return await storeKit2Manager.restorePurchases()
+        } else {
+            return await storeKit1Manager.restorePurchases()
+        }
+    }
+    public func finishTransactions(){
+        if #available(iOS 15.0, *),useV2 {
+            storeKit2Manager.finish()
+        } else {
+            storeKit1Manager.finish()
+        }
+    }
+}
+
+// MARK: - 统一数据模型
+public enum IAPError: Error {
+    case productNotFound
+    case productFetchFailed(Error)
+    case purchaseFailed(Error)
+    case receiptFetchFailed
+    case verificationFailed
+    case purchasePending
+    case userCancelled
+    case unknownError
+    case noTransation
+    case restoreFailed(Error)
+}
+
+public struct UnifiedProduct {
+    public let id: String
+    public var price: Decimal?{
+        
+        if #available(iOS 15, *){
+            return product?.price
+        }
+       
+        return (skProduct?.price as? Decimal)
+    }
+    public var introductoryPrice : Decimal?{
+        if #available(iOS 15, *){
+            return product?.subscription?.introductoryOffer?.price
+        }
+       
+        return (skProduct?.introductoryPrice?.price as? Decimal)
+    }
+    public var displayPrice : String?{
+        if #available(iOS 15, *){
+            return product?.displayPrice
+        }
+        return skProduct?.priceLocale.description
+    }
+    public var discountPrice : Decimal?{
+        if #available(iOS 15, *){
+            return product?.subscription?.promotionalOffers.first?.price
+        }
+        return (skProduct?.discounts.first?.price as? Decimal)
+    }
+    public var currencyCode : String?{
+        if #available(iOS 15, *){
+            return product?.priceFormatStyle.currencyCode
+        }
+        return skProduct?.priceLocale.currencySymbol 
+    }
+    public let displayName: String
+    public let type: ProductType
+    
+    public enum ProductType {
+        case consumable
+        case nonConsumable
+        case subscription
+    }
+}
+
+public struct UnifiedTransaction {
+    public let productID: String
+    public let transactionID: String
+    public let receipt: String?
+    public let jws: String?
+    public let purchaseDate: Date
+    public let transactionType: UnifiedProduct.ProductType
+    
+}
+
+
+extension UnifiedTransaction{
+    public var skProduct : SKProduct?{
+        return StoreKit1Manager.shared.products[productID]
+    }
+}
+
+@available(iOS 15.0, *)
+extension UnifiedTransaction{
+    public var product : Product?{
+        let p = StoreKit2Manager.shared.products[productID]
+        return p
+    }
+}
+extension UnifiedProduct{
+    public var skProduct : SKProduct?{
+        return StoreKit1Manager.shared.products[id]
+    }
+}
+
+@available(iOS 15.0, *)
+extension UnifiedProduct{
+    public var product : Product?{
+        let p = StoreKit2Manager.shared.products[id]
+        return p
+    }
+}
