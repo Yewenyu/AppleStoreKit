@@ -119,7 +119,7 @@ public struct UnifiedProduct {
         if #available(iOS 15, *){
             return product?.priceFormatStyle.currencyCode
         }
-        return skProduct?.priceLocale.currencySymbol
+        return skProduct?.priceLocale.currencyCode
     }
     public let displayName: String
     public let type: ProductType
