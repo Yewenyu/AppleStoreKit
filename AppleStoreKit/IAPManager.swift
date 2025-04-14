@@ -102,11 +102,24 @@ public struct UnifiedProduct {
         }
         return (skProduct?.discounts.first?.price as? Decimal)
     }
+    public var currencySymbol : String?{
+        if #available(iOS 15, *){
+            let formatter = NumberFormatter()
+            formatter.numberStyle = .currency
+            formatter.locale = product?.priceFormatStyle.locale
+
+            // 设置货币代码
+            formatter.currencyCode = product?.priceFormatStyle.currencyCode
+            
+            return formatter.currencySymbol
+        }
+        return skProduct?.priceLocale.currencySymbol
+    }
     public var currencyCode : String?{
         if #available(iOS 15, *){
             return product?.priceFormatStyle.currencyCode
         }
-        return skProduct?.priceLocale.currencySymbol 
+        return skProduct?.priceLocale.currencySymbol
     }
     public let displayName: String
     public let type: ProductType
