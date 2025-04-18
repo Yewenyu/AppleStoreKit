@@ -17,12 +17,27 @@ class StoreKit1Manager: NSObject {
     static let shared = StoreKit1Manager()
 
     var products: [String: SKProduct] = [:]
-    private var purchaseContinuation: PurchaseContinuation?
-    private var productsContinuation: ProductsContinuation?
-    // 添加新的恢复购买续体
-
-    private var restoreContinuation: RestoreContinuation?
-    private var receiptContinuation: ReceiptContinuation?
+    
+    actor Continuation<T> {
+        typealias CheckedType = CheckedContinuation<Result<T, IAPError>, Never>
+        var value = [CheckedType]()
+        
+        func append(_ continuation: CheckedType) async {
+            value.append(continuation)
+        }
+        func removeHandle() async -> [CheckedType]  {
+            let temp = value
+            value.removeAll()
+            return temp
+        }
+            
+    }
+    private var purchasesContinuation = Continuation<UnifiedTransaction>()
+    private var productsContinuation = Continuation<[UnifiedProduct]>()
+    private var restoreContinuation = Continuation<[UnifiedTransaction]>()
+    private var receiptContinuation = Continuation<()>()
+    
+    
 
 
     var currentTransactions : [SKPaymentTransaction] = []
@@ -49,11 +64,18 @@ extension StoreKit1Manager {
         
         
         await withCheckedContinuation { continuation in
-            self.productsContinuation = continuation
-            let request = SKProductsRequest(productIdentifiers: Set(productIDs))
-            request.delegate = self
+            Task{
+                let count = await self.productsContinuation.value.count
+                await self.productsContinuation.append(continuation)
+                if count > 0{
+                    return
+                }
+                let request = SKProductsRequest(productIdentifiers: Set(productIDs))
+                request.delegate = self
+                
+                request.start()
+            }
             
-            request.start()
 
         }
     }
@@ -64,17 +86,31 @@ extension StoreKit1Manager {
         }
 
         return await withCheckedContinuation { continuation in
-            self.purchaseContinuation = continuation
-            let payment = SKPayment(product: product)
-            SKPaymentQueue.default().add(payment)
+            Task{
+                let count = await self.purchasesContinuation.value.count
+                await self.purchasesContinuation.append(continuation)
+                if count > 0{
+                    return
+                }
+                let payment = SKPayment(product: product)
+                SKPaymentQueue.default().add(payment)
+            }
+            
         }
     }
 
     // 新增恢复购买方法
     func restorePurchases() async -> Result<[UnifiedTransaction], IAPError> {
         await withCheckedContinuation { continuation in
-            self.restoreContinuation = continuation
-            SKPaymentQueue.default().restoreCompletedTransactions()
+            Task{
+                let count = await self.restoreContinuation.value.count
+                await self.restoreContinuation.append(continuation)
+                if count > 0{
+                    return
+                }
+                SKPaymentQueue.default().restoreCompletedTransactions()
+            }
+            
         }
     }
 }
@@ -98,27 +134,40 @@ extension StoreKit1Manager: SKPaymentTransactionObserver {
     }
 
     private func handlePurchased(transaction: SKPaymentTransaction) {
-        guard let receipt = fetchReceipt() else {
-            purchaseContinuation?.resume(returning: .failure(.receiptFetchFailed))
-            return
+        Task{
+            guard let receipt = fetchReceipt() else {
+                await self.purchasesContinuation.removeHandle().forEach{$0.resume(returning: .failure(.receiptFetchFailed))}
+                
+                return
+            }
+            let product = products[transaction.payment.productIdentifier]
+            let unifiedTransaction = UnifiedTransaction(
+                productID: transaction.payment.productIdentifier,
+                transactionID: transaction.transactionIdentifier ?? UUID().uuidString,
+                receipt: receipt,
+                jws: nil,
+                purchaseDate: transaction.transactionDate ?? Date(),
+                transactionType: product?.subscriptionPeriod == nil ? .consumable : .subscription
+            )
+            currentTransactions.append(transaction)
+            await self.purchasesContinuation.removeHandle().forEach{
+                $0.resume(returning: .success(unifiedTransaction))
+            }
+            
         }
-        let product = products[transaction.payment.productIdentifier]
-        let unifiedTransaction = UnifiedTransaction(
-            productID: transaction.payment.productIdentifier,
-            transactionID: transaction.transactionIdentifier ?? UUID().uuidString,
-            receipt: receipt,
-            jws: nil,
-            purchaseDate: transaction.transactionDate ?? Date(),
-            transactionType: product?.subscriptionPeriod == nil ? .consumable : .subscription
-        )
-        currentTransactions.append(transaction)
-        purchaseContinuation?.resume(returning: .success(unifiedTransaction))
+        
     }
 
     private func handleFailed(transaction: SKPaymentTransaction) {
-        let error = transaction.error ?? NSError(domain: "IAPError", code: -1)
-        purchaseContinuation?.resume(returning: .failure(.purchaseFailed(error)))
-        SKPaymentQueue.default().finishTransaction(transaction)
+        Task{
+            let error = transaction.error ?? NSError(domain: "IAPError", code: -1)
+            await self.purchasesContinuation.removeHandle().forEach{
+                $0.resume(returning: .failure(.purchaseFailed(error)))
+            }
+            
+            SKPaymentQueue.default().finishTransaction(transaction)
+        }
+        
     }
 
     private func fetchReceipt() -> String? {
@@ -133,10 +182,13 @@ extension StoreKit1Manager: SKPaymentTransactionObserver {
         
         Task{
             _ = await withCheckedContinuation { continuation in
-                let refreshRequest = SKReceiptRefreshRequest()
-                refreshRequest.delegate = self
-                self.receiptContinuation = continuation
-                refreshRequest.start()
+                Task{
+                    let refreshRequest = SKReceiptRefreshRequest()
+                    refreshRequest.delegate = self
+                    await self.receiptContinuation.append(continuation)
+                    refreshRequest.start()
+                }
+                
             }
             var restoredTransactions: [UnifiedTransaction] = []
             
@@ -161,19 +213,32 @@ extension StoreKit1Manager: SKPaymentTransactionObserver {
                 restoredTransactions.append(unifiedTransaction)
                 currentTransactions.append(transaction)
             }
+            await self.restoreContinuation.removeHandle().forEach{
+                $0.resume(returning: .success(restoredTransactions))
+            }
 
-            restoreContinuation?.resume(returning: .success(restoredTransactions))
         }
         
     }
     func requestDidFinish(_ request: SKRequest) {
         if request is SKReceiptRefreshRequest{
-            receiptContinuation?.resume(returning: .success(()))
+            Task{
+                await self.receiptContinuation.removeHandle().forEach{
+                    $0.resume(returning: .success(()))
+                    
+                }
+            }
         }
     }
 
     func paymentQueue(_ queue: SKPaymentQueue, restoreCompletedTransactionsFailedWithError error: Error) {
-        restoreContinuation?.resume(returning: .failure(.purchaseFailed(error)))
+        Task{
+            await self.restoreContinuation.removeHandle().forEach{
+                $0.resume(returning: .failure(.purchaseFailed(error)))
+                
+            }
+        }
+
     }
 }
 
@@ -182,20 +247,28 @@ extension StoreKit1Manager: SKPaymentTransactionObserver {
 extension StoreKit1Manager: SKProductsRequestDelegate {
     func productsRequest(_ request: SKProductsRequest, didReceive response: SKProductsResponse) {
         
-        
-        self.products = Dictionary(uniqueKeysWithValues: response.products.map { ($0.productIdentifier, $0) })
-        let products = response.products.map{
-            UnifiedProduct(
-                id: $0.productIdentifier,
-                displayName: $0.localizedTitle,
-                type: $0.subscriptionPeriod == nil ? .consumable : .subscription
-            )
+        Task{
+            self.products = Dictionary(uniqueKeysWithValues: response.products.map { ($0.productIdentifier, $0) })
+            let products = response.products.map{
+                UnifiedProduct(
+                    id: $0.productIdentifier,
+                    displayName: $0.localizedTitle,
+                    type: $0.subscriptionPeriod == nil ? .consumable : .subscription
+                )
+            }
+            await self.productsContinuation.removeHandle().forEach{
+                $0.resume(returning: .success(products))
+            }
         }
-        productsContinuation?.resume(returning: .success(products))
+        
     }
 
     func request(_ request: SKRequest, didFailWithError error: Error) {
-        productsContinuation?.resume(returning: .failure(.productFetchFailed(error)))
+        Task{
+            await self.productsContinuation.removeHandle().forEach{
+                $0.resume(returning: .failure(.productFetchFailed(error)))
+            }
+        }
     }
 }
 
