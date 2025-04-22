@@ -144,27 +144,55 @@ public struct UnifiedTransaction {
 
 extension UnifiedTransaction{
     public var skProduct : SKProduct?{
-        return StoreKit1Manager.shared.products[productID]
+        return GetSKValues.getValues(StoreKit1Manager.shared.products).filter{$0.productIdentifier == productID}.first
     }
 }
 
 @available(iOS 15.0, *)
 extension UnifiedTransaction{
     public var product : Product?{
-        let p = StoreKit2Manager.shared.products[productID]
+        
+        let p = GetSKValues.getValues(StoreKit2Manager.shared.products).filter{$0.id == productID}.first
         return p
     }
 }
 extension UnifiedProduct{
     public var skProduct : SKProduct?{
-        return StoreKit1Manager.shared.products[id]
+        return GetSKValues.getValues(StoreKit1Manager.shared.products).filter{$0.productIdentifier == id}.first
     }
 }
 
 @available(iOS 15.0, *)
 extension UnifiedProduct{
     public var product : Product?{
-        let p = StoreKit2Manager.shared.products[id]
+        let p = GetSKValues.getValues(StoreKit2Manager.shared.products).filter{$0.id == id}.first
         return p
+    }
+}
+
+class GetSKValues<T>{
+    
+    static func getValues(_ vs : SKValues<T>) -> [T]{
+        let group = DispatchGroup()
+        group.enter()
+        var v = [T]()
+        Task{
+            v = await vs.value
+            group.leave()
+        }
+        group.wait()
+        return v
+    }
+}
+
+actor SKValues<T>{
+    var value = [T]()
+    func append(_ continuation: T) async {
+        value.append(continuation)
+    }
+    func removeHandle() async -> [T]  {
+        let temp = value
+        value.removeAll()
+        return temp
     }
 }

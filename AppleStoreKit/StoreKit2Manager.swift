@@ -12,17 +12,20 @@ import StoreKit
 class StoreKit2Manager: @unchecked Sendable {
     static let shared = StoreKit2Manager()
 
-    var products: [String: Product] = [:]
-    var currentTransaction : [Transaction] = []
+    var products = SKValues<Product>()
+    var currentTransaction = SKValues<Transaction>()
     var appAccountToken : String = ""
     func finish(){
-        currentTransaction.forEach { t in
-            Task {
-                await t.finish()
+        Task{
+            await currentTransaction.removeHandle().forEach{ t in
+                Task{
+                    await t.finish()
+                }
             }
         }
-        currentTransaction.removeAll()
+        
     }
+    var isFirstRestore = false
 }
 
 // MARK: - Public Methods
@@ -32,7 +35,9 @@ extension StoreKit2Manager {
     func fetchProducts(productIDs: [String]) async -> Result<[UnifiedProduct], IAPError> {
         do {
             let products = try await Product.products(for: productIDs)
-            self.products = Dictionary(uniqueKeysWithValues: products.map { ($0.id, $0) })
+            for p in products{
+                await self.products.append(p)
+            }
 
             let unifiedProducts = products.map {
                 UnifiedProduct(
@@ -48,7 +53,8 @@ extension StoreKit2Manager {
     }
 
     func purchase(productID: String) async -> Result<UnifiedTransaction, IAPError> {
-        guard let product = products[productID] else {
+        let products = await products.value
+        guard let product = products.filter({ $0.id == productID}).first else {
             return .failure(.productNotFound)
         }
 
@@ -61,7 +67,7 @@ extension StoreKit2Manager {
             switch result {
             case let .success(verification):
                 let transaction = try checkVerified(verification)
-                currentTransaction.append(transaction)
+                await currentTransaction.append(transaction)
                 return .success(UnifiedTransaction(
                     productID: productID,
                     transactionID: String(transaction.id),
@@ -96,19 +102,26 @@ extension StoreKit2Manager {
     func restorePurchases() async -> Result<[UnifiedTransaction], IAPError> {
         do {
             var unTransactions: [UnifiedTransaction] = []
-            for await verification in Transaction.updates {
-                let transaction = try checkVerified(verification)
-                currentTransaction.append(transaction)
-                unTransactions.append(UnifiedTransaction(
-                    productID: transaction.productID,
-                    transactionID: String(transaction.id),
-                    receipt: nil,
-                    jws: verification.jwsRepresentation,
-                    purchaseDate: transaction.purchaseDate,
-                    transactionType: transaction.productType.toUnifiedType()
-                ))
+            func handle(_ trans:Transaction.Transactions) async throws{
+                for await verification in trans {
+                    let transaction = try checkVerified(verification)
+                    await currentTransaction.append(transaction)
+                    unTransactions.append(UnifiedTransaction(
+                        productID: transaction.productID,
+                        transactionID: String(transaction.id),
+                        receipt: nil,
+                        jws: verification.jwsRepresentation,
+                        purchaseDate: transaction.purchaseDate,
+                        transactionType: transaction.productType.toUnifiedType()
+                    ))
+                }
             }
-
+            if isFirstRestore{
+                isFirstRestore = false
+                try await handle(Transaction.updates)
+            }else{
+                try await handle(Transaction.currentEntitlements)
+            }
             return unTransactions.count > 0 ? .success(unTransactions) : .failure(.noTransation)
         } catch {
             return .failure(.restoreFailed(error))

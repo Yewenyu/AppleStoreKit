@@ -16,36 +16,23 @@ class StoreKit1Manager: NSObject {
 
     static let shared = StoreKit1Manager()
 
-    var products: [String: SKProduct] = [:]
+    var products = SKValues<SKProduct>()
     
-    actor Continuation<T> {
-        typealias CheckedType = CheckedContinuation<Result<T, IAPError>, Never>
-        var value = [CheckedType]()
-        
-        func append(_ continuation: CheckedType) async {
-            value.append(continuation)
-        }
-        func removeHandle() async -> [CheckedType]  {
-            let temp = value
-            value.removeAll()
-            return temp
-        }
-            
-    }
-    private var purchasesContinuation = Continuation<UnifiedTransaction>()
-    private var productsContinuation = Continuation<[UnifiedProduct]>()
-    private var restoreContinuation = Continuation<[UnifiedTransaction]>()
-    private var receiptContinuation = Continuation<()>()
+    typealias CheckedType<T> = CheckedContinuation<Result<T, IAPError>, Never>
     
+    private var purchasesContinuation = SKValues<CheckedType<UnifiedTransaction>>()
+    private var productsContinuation = SKValues<CheckedType<[UnifiedProduct]>>()
+    private var restoreContinuation = SKValues<CheckedType<[UnifiedTransaction]>>()
+    private var receiptContinuation = SKValues<CheckedType<()>>()
     
-
-
-    var currentTransactions : [SKPaymentTransaction] = []
+  
+    var currentTransactions = SKValues<SKPaymentTransaction>()
     func finish(){
-        currentTransactions.forEach {
-            SKPaymentQueue.default().finishTransaction($0)
+        Task{
+            await currentTransactions.removeHandle().forEach {
+                SKPaymentQueue.default().finishTransaction($0)
+            }
         }
-        currentTransactions.removeAll()
     }
     override init() {
         super.init()
@@ -81,7 +68,7 @@ extension StoreKit1Manager {
     }
 
     func purchase(productID: String) async -> Result<UnifiedTransaction, IAPError> {
-        guard let product = products[productID] else {
+        guard let product = (await products.value).filter({$0.productIdentifier == productID}).first else {
             return .failure(.productNotFound)
         }
 
@@ -119,28 +106,36 @@ extension StoreKit1Manager {
 
 extension StoreKit1Manager: SKPaymentTransactionObserver {
     func paymentQueue(_ queue: SKPaymentQueue, updatedTransactions transactions: [SKPaymentTransaction]) {
-        for transaction in transactions {
-            switch transaction.transactionState {
-            case .purchased:
-                handlePurchased(transaction: transaction)
-            case .failed:
-                handleFailed(transaction: transaction)
-            case .restored, .deferred, .purchasing:
-                break
-            @unknown default:
-                break
+        
+        Task{
+            let count = await self.restoreContinuation.value.count
+            if count > 0{
+                handleRestore(transactions)
+                return
+            }
+            for transaction in transactions {
+                switch transaction.transactionState {
+                case .purchased,.restored:
+                    handlePurchased(transaction: transaction)
+                case .failed,.deferred:
+                    handleFailed(transaction: transaction)
+                 default:
+                    break
+                }
             }
         }
+        
     }
 
     private func handlePurchased(transaction: SKPaymentTransaction) {
         Task{
+            await requestReceipt()
             guard let receipt = fetchReceipt() else {
                 await self.purchasesContinuation.removeHandle().forEach{$0.resume(returning: .failure(.receiptFetchFailed))}
                 
                 return
             }
-            let product = products[transaction.payment.productIdentifier]
+            let product = (await products.value).filter{$0.productIdentifier == transaction.payment.productIdentifier}.first
             let unifiedTransaction = UnifiedTransaction(
                 productID: transaction.payment.productIdentifier,
                 transactionID: transaction.transactionIdentifier ?? UUID().uuidString,
@@ -149,7 +144,7 @@ extension StoreKit1Manager: SKPaymentTransactionObserver {
                 purchaseDate: transaction.transactionDate ?? Date(),
                 transactionType: product?.subscriptionPeriod == nil ? .consumable : .subscription
             )
-            currentTransactions.append(transaction)
+            await currentTransactions.append(transaction)
             await self.purchasesContinuation.removeHandle().forEach{
                 $0.resume(returning: .success(unifiedTransaction))
             }
@@ -178,28 +173,29 @@ extension StoreKit1Manager: SKPaymentTransactionObserver {
         return receiptData.base64EncodedString()
     }
 
-    func paymentQueueRestoreCompletedTransactionsFinished(_ queue: SKPaymentQueue) {
-        
-        Task{
-            _ = await withCheckedContinuation { continuation in
-                Task{
-                    let refreshRequest = SKReceiptRefreshRequest()
-                    refreshRequest.delegate = self
-                    await self.receiptContinuation.append(continuation)
-                    refreshRequest.start()
-                }
-                
+    func requestReceipt() async{
+        _ = await withCheckedContinuation { continuation in
+            Task{
+                let refreshRequest = SKReceiptRefreshRequest()
+                refreshRequest.delegate = self
+                await self.receiptContinuation.append(continuation)
+                refreshRequest.start()
             }
+        }
+    }
+    func handleRestore(_ transactions:[SKPaymentTransaction]){
+        Task{
+            await requestReceipt()
             var restoredTransactions: [UnifiedTransaction] = []
             
 
             let receipt = fetchReceipt()
-            for transaction in queue.transactions {
+            for transaction in transactions {
                 guard transaction.transactionState == .restored else {
                     continue
                 }
                 
-                let product = products[transaction.payment.productIdentifier]
+                let product = (await products.value).filter{$0.productIdentifier == transaction.payment.productIdentifier}.first
 
                 let unifiedTransaction = UnifiedTransaction(
                     productID: transaction.payment.productIdentifier,
@@ -211,13 +207,17 @@ extension StoreKit1Manager: SKPaymentTransactionObserver {
                 )
 
                 restoredTransactions.append(unifiedTransaction)
-                currentTransactions.append(transaction)
+                await currentTransactions.append(transaction)
             }
             await self.restoreContinuation.removeHandle().forEach{
                 $0.resume(returning: .success(restoredTransactions))
             }
 
         }
+    }
+    func paymentQueueRestoreCompletedTransactionsFinished(_ queue: SKPaymentQueue) {
+        
+        handleRestore(queue.transactions)
         
     }
     func requestDidFinish(_ request: SKRequest) {
@@ -248,7 +248,9 @@ extension StoreKit1Manager: SKProductsRequestDelegate {
     func productsRequest(_ request: SKProductsRequest, didReceive response: SKProductsResponse) {
         
         Task{
-            self.products = Dictionary(uniqueKeysWithValues: response.products.map { ($0.productIdentifier, $0) })
+            for p in response.products{
+                await self.products.append(p)
+            }
             let products = response.products.map{
                 UnifiedProduct(
                     id: $0.productIdentifier,
