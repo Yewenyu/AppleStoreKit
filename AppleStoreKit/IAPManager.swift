@@ -148,6 +148,7 @@ extension UnifiedTransaction{
     public var skProduct : SKProduct?{
         return GetSKValues.getValues(StoreKit1Manager.shared.products).filter{$0.productIdentifier == productID}.first
     }
+    
 }
 
 @available(iOS 15.0, *)
@@ -156,6 +157,11 @@ extension UnifiedTransaction{
         
         let p = GetSKValues.getValues(StoreKit2Manager.shared.products).filter{$0.id == productID}.first
         return p
+    }
+    public var v2Transaction : Transaction?{
+        return GetSKValues.getValues(StoreKit2Manager.shared.currentTransaction).filter {
+            String($0.id) == self.transactionID
+        }.first
     }
 }
 extension UnifiedProduct{
