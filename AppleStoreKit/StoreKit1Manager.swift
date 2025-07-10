@@ -25,6 +25,8 @@ class StoreKit1Manager: NSObject {
     private var restoreContinuation = SKValues<CheckedType<[UnifiedTransaction]>>()
     private var receiptContinuation = SKValues<CheckedType<()>>()
     
+    var appAccountToken : String?
+    
   
     var currentTransactions = SKValues<SKPaymentTransaction>()
     func finish(){
@@ -79,7 +81,8 @@ extension StoreKit1Manager {
                 if count > 0{
                     return
                 }
-                let payment = SKPayment(product: product)
+                let payment = SKMutablePayment(product: product)
+                payment.applicationUsername = appAccountToken
                 SKPaymentQueue.default().add(payment)
             }
             

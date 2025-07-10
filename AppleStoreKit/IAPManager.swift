@@ -21,6 +21,8 @@ public class IAPManager {
     public func appAccountToken(_ token:String){
         if #available(iOS 15.0, *){
             storeKit2Manager.appAccountToken = token
+        }else{
+            storeKit1Manager.appAccountToken = token
         }
     }
     
