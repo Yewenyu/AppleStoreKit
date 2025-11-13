@@ -8,7 +8,7 @@
 import Foundation
 import StoreKit
 
-@available(iOS 15.0, *)
+@available(iOS 15.0, macOS 12.0, *)
 class StoreKit2Manager: @unchecked Sendable {
     static let shared = StoreKit2Manager()
 
@@ -30,7 +30,7 @@ class StoreKit2Manager: @unchecked Sendable {
 
 // MARK: - Public Methods
 
-@available(iOS 15.0, *)
+@available(iOS 15.0, macOS 12.0, *)
 extension StoreKit2Manager {
     func fetchProducts(productIDs: [String]) async -> Result<[UnifiedProduct], IAPError> {
         do {
@@ -131,7 +131,7 @@ extension StoreKit2Manager {
 
 // MARK: - 类型转换扩展
 
-@available(iOS 15.0, *)
+@available(iOS 15.0, macOS 12.0, *)
 extension Product.ProductType {
     func toUnifiedType() -> UnifiedProduct.ProductType {
         switch self {

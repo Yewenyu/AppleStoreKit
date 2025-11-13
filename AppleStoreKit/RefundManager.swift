@@ -9,7 +9,7 @@ import StoreKit
 import Combine
 
 
-@available(iOS 15.0, *)
+@available(iOS 15.0, macOS 12.0, *)
 public class RefundManager {
     public static let shared = RefundManager()
     
@@ -24,8 +24,13 @@ public class RefundManager {
     }
     public func requestRefund(for transaction: Transaction) async -> Result<Void, Error> {
         do {
-            if let scene = await UIApplication.shared.currentWindowScene {
-                let result = try await transaction.beginRefundRequest(in: scene)
+            #if canImport(UIKit)
+            let scene = await UIApplication.shared.currentWindowScene
+            #else
+            let scene = await NSApplication.currentView
+            #endif
+            if let scene {
+                _ = try await transaction.beginRefundRequest(in: scene)
                 print("退款请求已成功发送。")
                 return .success(())
             }
@@ -39,7 +44,7 @@ public class RefundManager {
     
 }
 
-
+#if canImport(UIKit)
 extension UIApplication {
     var currentWindowScene: UIWindowScene? {
         connectedScenes
@@ -47,3 +52,11 @@ extension UIApplication {
             .first(where: { $0 is UIWindowScene }) as? UIWindowScene
     }
 }
+#else
+extension NSApplication {
+    static var currentView: NSViewController? {
+        NSApp.keyWindow?.contentViewController
+    }
+}
+    
+#endif

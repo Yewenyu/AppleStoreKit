@@ -13,13 +13,13 @@ public class IAPManager {
     private init() {}
     
     private lazy var storeKit1Manager = StoreKit1Manager.shared
-    @available(iOS 15.0, *)
+    @available(iOS 15.0, macOS 12.0, *)
     private var storeKit2Manager: StoreKit2Manager { StoreKit2Manager.shared }
     
     public var useV2 = true
     
     public func appAccountToken(_ token:String){
-        if #available(iOS 15.0, *){
+        if #available(iOS 15.0, macOS 12.0, *){
             storeKit2Manager.appAccountToken = token
         }else{
             storeKit1Manager.appAccountToken = token
@@ -31,7 +31,7 @@ public class IAPManager {
 // MARK: - Public Interface
 extension IAPManager {
     public func fetchProducts(productIDs: [String]) async -> Result<[UnifiedProduct], IAPError> {
-        if #available(iOS 15.0, *),useV2 {
+        if #available(iOS 15.0, macOS 12.0, *),useV2 {
             return await storeKit2Manager.fetchProducts(productIDs: productIDs)
         } else {
             return await storeKit1Manager.fetchProducts(productIDs: productIDs)
@@ -39,21 +39,21 @@ extension IAPManager {
     }
     
     public func purchase(productID: String) async -> Result<UnifiedTransaction, IAPError> {
-        if #available(iOS 15.0, *),useV2 {
+        if #available(iOS 15.0, macOS 12.0, *),useV2 {
             return await storeKit2Manager.purchase(productID: productID)
         } else {
             return await storeKit1Manager.purchase(productID: productID)
         }
     }
     public func restore() async -> Result<[UnifiedTransaction],IAPError>{
-        if #available(iOS 15.0, *),useV2 {
+        if #available(iOS 15.0, macOS 12.0, *),useV2 {
             return await storeKit2Manager.restorePurchases()
         } else {
             return await storeKit1Manager.restorePurchases()
         }
     }
     public func finishTransactions(){
-        if #available(iOS 15.0, *),useV2 {
+        if #available(iOS 15.0, macOS 12.0, *),useV2 {
             storeKit2Manager.finish()
         } else {
             storeKit1Manager.finish()
@@ -79,33 +79,33 @@ public struct UnifiedProduct {
     public let id: String
     public var price: Decimal?{
         
-        if #available(iOS 15, *){
+        if #available(iOS 15.0, macOS 12.0, *){
             return product?.price
         }
        
         return (skProduct?.price as? Decimal)
     }
     public var introductoryPrice : Decimal?{
-        if #available(iOS 15, *){
+        if #available(iOS 15.0, macOS 12.0, *){
             return product?.subscription?.introductoryOffer?.price
         }
        
         return (skProduct?.introductoryPrice?.price as? Decimal)
     }
     public var displayPrice : String?{
-        if #available(iOS 15, *){
+        if #available(iOS 15.0, macOS 12.0, *){
             return product?.displayPrice
         }
         return skProduct?.priceLocale.description
     }
     public var discountPrice : Decimal?{
-        if #available(iOS 15, *){
+        if #available(iOS 15.0, macOS 12.0, *){
             return product?.subscription?.promotionalOffers.first?.price
         }
         return (skProduct?.discounts.first?.price as? Decimal)
     }
     public var currencySymbol : String?{
-        if #available(iOS 15, *){
+        if #available(iOS 15.0, macOS 12.0, *){
             let formatter = NumberFormatter()
             formatter.numberStyle = .currency
             formatter.locale = product?.priceFormatStyle.locale
@@ -118,7 +118,7 @@ public struct UnifiedProduct {
         return skProduct?.priceLocale.currencySymbol
     }
     public var currencyCode : String?{
-        if #available(iOS 15, *){
+        if #available(iOS 15.0, macOS 12.0, *){
             return product?.priceFormatStyle.currencyCode
         }
         return skProduct?.priceLocale.currencyCode
@@ -150,7 +150,7 @@ extension UnifiedTransaction{
     }
 }
 
-@available(iOS 15.0, *)
+@available(iOS 15.0, macOS 12.0, *)
 extension UnifiedTransaction{
     public var product : Product?{
         
@@ -164,7 +164,7 @@ extension UnifiedProduct{
     }
 }
 
-@available(iOS 15.0, *)
+@available(iOS 15.0, macOS 12.0, *)
 extension UnifiedProduct{
     public var product : Product?{
         let p = GetSKValues.getValues(StoreKit2Manager.shared.products).filter{$0.id == id}.first
