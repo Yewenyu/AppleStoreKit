@@ -1,7 +1,7 @@
 
 Pod::Spec.new do |s|
   s.name             = 'AppleStoreKit'
-  s.version          = '0.1.6'
+  s.version          = '0.1.7'
   s.summary          = 'A library that is compatible with StoreKit and StoreKit v2.'
   s.description      = <<-DESC
 This library provides functionality to work with both StoreKit and StoreKit v2 in iOS applications.
@@ -12,6 +12,7 @@ This library provides functionality to work with both StoreKit and StoreKit v2 i
   s.source           = { :git => 'https://github.com/Yewenyu/AppleStoreKit.git', :tag => s.version.to_s }
 
   s.ios.deployment_target = '13.0'
+  s.osx.deployment_target = '10.15'
   s.swift_version = '5.0'
 
   s.source_files = 'AppleStoreKit'
